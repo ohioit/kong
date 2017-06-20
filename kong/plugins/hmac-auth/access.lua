@@ -35,6 +35,12 @@ local hmac = {
   end,
   ["hmac-sha256"] = function(secret, data)
     return crypto.hmac.digest("sha256", data, secret, true)
+  end,
+  ["hmac-sha384"] = function(secret, data)
+    return crypto.hmac.digest("sha384", data, secret, true)
+  end,
+  ["hmac-sha512"] = function(secret, data)
+    return crypto.hmac.digest("sha512", data, secret, true)
   end
 }
 

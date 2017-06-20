@@ -8,10 +8,6 @@ local hmac_sha1_binary = function(secret, data)
   return crypto.hmac.digest("sha1", data, secret, true)
 end
 
-local hmac_sha256_binary = function(secret, data)
-  return crypto.hmac.digest("sha256", data, secret, true)
-end
-
 local SIGNATURE_NOT_VALID = "HMAC signature cannot be verified"
 
 describe("Plugin: hmac-auth (access)", function()
@@ -624,8 +620,8 @@ describe("Plugin: hmac-auth (access)", function()
     it("should not pass with GET with wrong algorithm", function()
       local date = os.date("!%a, %d %b %Y %H:%M:%S GMT")
       local encodedSignature = ngx.encode_base64(
-        hmac_sha256_binary("secret", "date: " .. date .. "\n"
-          .. "content-md5: md5" .. "\nGET /requests HTTP/1.1"))
+        crypto.hmac.digest("sha256","date: " .. date .. "\n"
+          .. "content-md5: md5" .. "\nGET /requests HTTP/1.1", "secret", true))
       local hmacAuth = [[hmac username="bob",algorithm="hmac-sha",]]
         .. [[  headers="date content-md5 request-line",signature="]]
         .. encodedSignature .. [["]]
@@ -647,8 +643,9 @@ describe("Plugin: hmac-auth (access)", function()
     it("should pass the right headers to the upstream server", function()
       local date = os.date("!%a, %d %b %Y %H:%M:%S GMT")
       local encodedSignature = ngx.encode_base64(
-        hmac_sha256_binary("secret", "date: " .. date .. "\n"
-          .. "content-md5: md5" .. "\nGET /requests HTTP/1.1"))
+        crypto.hmac.digest("sha256","date: " .. date .. "\n"
+                           .. "content-md5: md5" .. "\nGET /requests HTTP/1.1",
+                           "secret", true))
       local hmacAuth = [[hmac username="bob",algorithm="hmac-sha256",]]
         .. [[  headers="date content-md5 request-line",signature="]]
         .. encodedSignature .. [["]]
@@ -1077,6 +1074,52 @@ describe("Plugin: hmac-auth (access)", function()
       })
       assert.res_status(403, res)
     end)
+
+    it("should pass with GET with hmac-sha384", function()
+      local date = os.date("!%a, %d %b %Y %H:%M:%S GMT")
+      local encodedSignature = ngx.encode_base64(
+        crypto.hmac.digest("sha384","date: " .. date .. "\n"
+                .. "content-md5: md5" .. "\nGET /requests HTTP/1.1", "secret", true))
+      local hmacAuth = [[hmac username="bob",  algorithm="hmac-sha384", ]]
+              .. [[headers="date content-md5 request-line", signature="]]
+              .. encodedSignature .. [["]]
+      local res = assert(client:send {
+        method = "GET",
+        path = "/requests",
+        body = {},
+        headers = {
+          ["HOST"] = "hmacauth5.com",
+          date = date,
+          ["proxy-authorization"] = hmacAuth,
+          ["content-md5"] = "md5"
+        }
+      })
+      assert.res_status(200, res)
+    end)
+
+    it("should pass with GET with hmac-sha512", function()
+      local date = os.date("!%a, %d %b %Y %H:%M:%S GMT")
+      local encodedSignature = ngx.encode_base64(
+        crypto.hmac.digest("sha512","date: " .. date .. "\n"
+                .. "content-md5: md5" .. "\nGET /requests HTTP/1.1", "secret", true))
+      local hmacAuth = [[hmac username="bob",  algorithm="hmac-sha512", ]]
+              .. [[headers="date content-md5 request-line", signature="]]
+              .. encodedSignature .. [["]]
+      local res = assert(client:send {
+        method = "GET",
+        path = "/requests",
+        body = {},
+        headers = {
+          ["HOST"] = "hmacauth5.com",
+          date = date,
+          ["proxy-authorization"] = hmacAuth,
+          ["content-md5"] = "md5"
+        }
+      })
+      assert.res_status(200, res)
+    end)
+
+
   end)
 end)
 
