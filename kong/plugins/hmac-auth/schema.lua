@@ -4,7 +4,7 @@ local function check_user(anonymous)
   if anonymous == "" or utils.is_valid_uuid(anonymous) then
     return true
   end
-  
+
   return false, "the anonymous user must be empty or a valid uuid"
 end
 
@@ -22,5 +22,6 @@ return {
     clock_skew = { type = "number", default = 300, func = check_clock_skew_positive },
     anonymous = {type = "string", default = "", func = check_user},
     validate_request_body = { type = "boolean", default = false },
+    enforce_headers = {type = "array", default = {}}
   }
 }

@@ -8,6 +8,10 @@ local hmac_sha1_binary = function(secret, data)
   return crypto.hmac.digest("sha1", data, secret, true)
 end
 
+local hmac_sha256_binary = function(secret, data)
+  return crypto.hmac.digest("sha256", data, secret, true)
+end
+
 local SIGNATURE_NOT_VALID = "HMAC signature cannot be verified"
 
 describe("Plugin: hmac-auth (access)", function()
@@ -78,6 +82,21 @@ describe("Plugin: hmac-auth (access)", function()
       api_id = api4.id,
       config = {
         clock_skew = 3000,
+        validate_request_body = true
+      }
+    })
+
+    local api5 = assert(helpers.dao.apis:insert {
+      name = "api-5",
+      hosts = { "hmacauth5.com" },
+      upstream_url = "http://mockbin.com"
+    })
+    assert(helpers.dao.plugins:insert {
+      name = "hmac-auth",
+      api_id = api5.id,
+      config = {
+        clock_skew = 3000,
+        enforce_headers = {"date", "request-line"},
         validate_request_body = true
       }
     })
@@ -602,12 +621,12 @@ describe("Plugin: hmac-auth (access)", function()
       assert.res_status(200, res)
     end)
 
-    it("should pass with GET with wrong algorithm", function()
+    it("should not pass with GET with wrong algorithm", function()
       local date = os.date("!%a, %d %b %Y %H:%M:%S GMT")
       local encodedSignature = ngx.encode_base64(
-        hmac_sha1_binary("secret", "date: " .. date .. "\n"
+        hmac_sha256_binary("secret", "date: " .. date .. "\n"
           .. "content-md5: md5" .. "\nGET /requests HTTP/1.1"))
-      local hmacAuth = [[hmac username="bob",algorithm="hmac-sha256",]]
+      local hmacAuth = [[hmac username="bob",algorithm="hmac-sha",]]
         .. [[  headers="date content-md5 request-line",signature="]]
         .. encodedSignature .. [["]]
       local res = assert(client:send {
@@ -622,13 +641,13 @@ describe("Plugin: hmac-auth (access)", function()
           ["content-md5"] = "md5"
         }
       })
-      assert.res_status(200, res)
+      assert.res_status(403, res)
     end)
 
     it("should pass the right headers to the upstream server", function()
       local date = os.date("!%a, %d %b %Y %H:%M:%S GMT")
       local encodedSignature = ngx.encode_base64(
-        hmac_sha1_binary("secret", "date: " .. date .. "\n"
+        hmac_sha256_binary("secret", "date: " .. date .. "\n"
           .. "content-md5: md5" .. "\nGET /requests HTTP/1.1"))
       local hmacAuth = [[hmac username="bob",algorithm="hmac-sha256",]]
         .. [[  headers="date content-md5 request-line",signature="]]
@@ -1015,10 +1034,51 @@ describe("Plugin: hmac-auth (access)", function()
       assert.equal("HMAC signature does not match", body.message)
     end)
 
+    it("should pass with GET with request-line", function()
+      local date = os.date("!%a, %d %b %Y %H:%M:%S GMT")
+      local encodedSignature = ngx.encode_base64(
+        hmac_sha1_binary("secret", "date: "
+                .. date .. "\n" .. "content-md5: md5" .. "\nGET /requests HTTP/1.1"))
+      local hmacAuth = [[hmac username="bob",  algorithm="hmac-sha1", ]]
+              .. [[headers="date content-md5 request-line", signature="]]
+              .. encodedSignature .. [["]]
+      local res = assert(client:send {
+        method = "GET",
+        path = "/requests",
+        body = {},
+        headers = {
+          ["HOST"] = "hmacauth5.com",
+          date = date,
+          ["proxy-authorization"] = hmacAuth,
+          ["content-md5"] = "md5"
+        }
+      })
+      assert.res_status(200, res)
+    end)
+
+    it("should fail with GET when enforced header request-line missing", function()
+      local date = os.date("!%a, %d %b %Y %H:%M:%S GMT")
+      local encodedSignature = ngx.encode_base64(
+        hmac_sha1_binary("secret", "date: "
+                .. date .. "\n" .. "content-md5: md5"))
+      local hmacAuth = [[hmac username="bob",  algorithm="hmac-sha1", ]]
+              .. [[headers="date content-md5", signature="]]
+              .. encodedSignature .. [["]]
+      local res = assert(client:send {
+        method = "GET",
+        path = "/requests",
+        body = {},
+        headers = {
+          ["HOST"] = "hmacauth5.com",
+          date = date,
+          ["proxy-authorization"] = hmacAuth,
+          ["content-md5"] = "md5"
+        }
+      })
+      assert.res_status(403, res)
+    end)
   end)
 end)
-
-
 
 describe("Plugin: hmac-auth (access)", function()
 

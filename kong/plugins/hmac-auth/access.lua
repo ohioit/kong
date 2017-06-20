@@ -2,6 +2,7 @@ local utils = require "kong.tools.utils"
 local responses = require "kong.tools.responses"
 local constants = require "kong.constants"
 local singletons = require "kong.singletons"
+local crypto = require "crypto"
 local resty_sha256 = require "resty.sha256"
 
 local math_abs = math.abs
@@ -10,7 +11,6 @@ local ngx_gmatch = ngx.re.gmatch
 local ngx_decode_base64 = ngx.decode_base64
 local ngx_encode_base64 = ngx.encode_base64
 local ngx_parse_time = ngx.parse_http_time
-local ngx_sha1 = ngx.hmac_sha1
 local ngx_set_header = ngx.req.set_header
 local ngx_get_headers = ngx.req.get_headers
 local ngx_log = ngx.log
@@ -28,6 +28,58 @@ local SIGNATURE_NOT_VALID = "HMAC signature cannot be verified"
 local SIGNATURE_NOT_SAME = "HMAC signature does not match"
 
 local _M = {}
+
+local hmac = {
+  ["hmac-sha1"] = function(secret, data)
+    return crypto.hmac.digest("sha1", data, secret, true)
+  end,
+  ["hmac-sha256"] = function(secret, data)
+    return crypto.hmac.digest("sha256", data, secret, true)
+  end
+}
+
+local algorithm = {
+  ["hmac-sha1"]   = true,
+  ["hmac-sha256"] = true,
+  ["hmac-sha384"] = true,
+  ["hmac-sha512"] = true,
+}
+
+
+local function list_as_set(list)
+  local set = {}
+  for _, v in ipairs(list) do
+    set[v] = true;
+  end
+
+  return set
+end
+
+local function validate_params(params, enforced_header)
+  -- check username and signature are present
+  if not (params.username and params.signature) then
+    return nil
+  end
+
+  -- check enforced headers are present
+  local enfoprced_header_set = list_as_set(enforced_header)
+  for _, header in ipairs(params.hmac_headers) do
+    enfoprced_header_set[header] = nil
+  end
+
+  for _, header in ipairs(enforced_header) do
+    if enfoprced_header_set[header] then
+      return nil
+    end
+  end
+
+  -- check supported alorithm used
+  if not algorithm[params.algorithm] then
+    return nil
+  end
+
+  return true
+end
 
 local function retrieve_hmac_fields(request, headers, header_name, conf)
   local hmac_params = {}
@@ -84,7 +136,7 @@ local function create_hash(request, hmac_params, headers)
       signing_string = signing_string .. "\n"
     end
   end
-  return ngx_sha1(hmac_params.secret, signing_string)
+  return hmac[hmac_params.algorithm](hmac_params.secret, signing_string)
 end
 
 local function validate_signature(request, hmac_params, headers)
@@ -183,6 +235,7 @@ local function set_consumer(consumer, credential)
 end
 
 local function do_authentication(conf)
+
   local headers = ngx_get_headers()
   -- If both headers are missing, return 401
   if not (headers[AUTHORIZATION] or headers[PROXY_AUTHORIZATION]) then
@@ -196,11 +249,13 @@ local function do_authentication(conf)
 
   -- retrieve hmac parameter from Proxy-Authorization header
   local hmac_params = retrieve_hmac_fields(ngx.req, headers, PROXY_AUTHORIZATION, conf)
+
   -- Try with the authorization header
   if not hmac_params.username then
     hmac_params = retrieve_hmac_fields(ngx.req, headers, AUTHORIZATION, conf)
   end
-  if not (hmac_params.username and hmac_params.signature) then
+
+  if not validate_params(hmac_params, conf.enforce_headers) then
     return false, {status = 403, message = SIGNATURE_NOT_VALID}
   end
 
